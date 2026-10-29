@@ -1,0 +1,70 @@
+name: Panel Feed base and branch diagnostics
+on:
+  push:
+    branches: [validation/panel8859-feed-oct29]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base
+            revision: 7fb8f5d03965201c5d18b085fe129d1c8439fd4a
+          - label: branch
+            revision: f39bdebc9d8b0239654509043caa6554f23eeb74
+    env:
+      OMP_NUM_THREADS: 1
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      VECLIB_MAXIMUM_THREADS: 1
+      NUMEXPR_NUM_THREADS: 1
+      PYDEVD_DISABLE_FILE_VALIDATION: 1
+      PANEL_LOG_LEVEL: info
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+      PLAYWRIGHT_BROWSERS_PATH: .pixi/playwright-browsers
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Preserve original failing-run dependency lock
+        run: cp .validation/pixi.lock /tmp/panel-original-pixi.lock
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ matrix.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Restore dependency lock and configure Pixi
+        run: |
+          cp /tmp/panel-original-pixi.lock pixi.lock
+          mkdir -p ~/.pixi
+          echo 'run-post-link-scripts = "insecure"' > ~/.pixi/config.toml
+          git rev-parse HEAD
+          sha256sum pixi.lock
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347
+        with:
+          environments: test-ui
+          cache: false
+          frozen: true
+      - name: Install actual checked-out Panel and Chromium
+        run: |
+          pixi run --frozen -e test-ui install -v
+          pixi run --frozen -e test-ui playwright install --with-deps chromium
+          pixi run --frozen -e test-ui python -c "import panel; print(panel.__file__)"
+      - name: Run unchanged Feed tests three times
+        shell: bash
+        run: |
+          failures=0
+          for attempt in 1 2 3; do
+            pixi run --frozen -e test-ui pytest panel/tests/ui/layout/test_feed.py --ui --browser chromium -n 2 --dist loadgroup --screenshot only-on-failure --full-page-screenshot --output "feed-results/$attempt" --tracing retain-on-failure --junitxml="feed-results/$attempt.xml" || failures=$((failures + 1))
+          done
+          exit "$failures"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: feed-${{ matrix.label }}
+          path: feed-results
