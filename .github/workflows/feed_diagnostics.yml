@@ -43,7 +43,9 @@ jobs:
           cp /tmp/panel-original-pixi.lock pixi.lock
           mkdir -p ~/.pixi
           echo 'run-post-link-scripts = "insecure"' > ~/.pixi/config.toml
+          git fetch --tags --force https://github.com/holoviz/panel.git
           git rev-parse HEAD
+          git describe --tags --long
           sha256sum pixi.lock
       - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347
         with:
